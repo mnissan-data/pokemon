@@ -397,37 +397,53 @@ function famLabel(fam){
   if(fam.length>1)return (NAMEBYDEX[fam[0]]||'?')+' line';
   return NAMEBYDEX[fam[0]]||'?';
 }
+// Featured lines shown first, exempt from the one-type-per-page rule.
+const FEATURED=[[1,2,3],[4,5,6],[7,8,9],[134,135,136],[144,145,146]];
+const PREFER_SET={145:'Base'}; // Zapdos -> use the Base Set version (Fossil goes to duplicates)
 function familyLayout(pool){
   const byDex={}; pool.forEach(c=>{if(c.dex){(byDex[c.dex]=byDex[c.dex]||[]).push(c);}});
-  // one card per Pokémon: the holo if it exists (so the holo sits IN the evolution-line row),
-  // otherwise the non-holo. Every other version (non-holo twins, extra prints) goes to Duplicates.
+  const misc=[];
+  // one card per Pokémon: the holo if it exists, else non-holo; everything else -> Duplicates.
   function pick(dex){
-    const cs=(byDex[dex]||[]).slice().sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
+    let cs=(byDex[dex]||[]).slice().sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
+    if(PREFER_SET[dex]){ cs.sort((a,b)=>((b.set===PREFER_SET[dex])?1:0)-((a.set===PREFER_SET[dex])?1:0)||SETORD[a.set]-SETORD[b.set]||a.num-b.num); }
     const holos=cs.filter(c=>c.holo), non=cs.filter(c=>!c.holo);
     const primary=holos[0]||non[0]||null;
-    const extras=cs.filter(c=>c!==primary);
-    return {primary,extras};
+    return {primary,extras:cs.filter(c=>c!==primary)};
   }
-  let groups=FAMILIES.map(fam=>{
-    const members=fam.filter(d=>byDex[d]&&byDex[d].length);
-    return {fam,members,size:members.length,base:fam[0]};
-  }).filter(g=>g.size>0);
-  groups.sort((a,b)=>b.size-a.size||a.base-b.base);
-
-  // 3-member lines are exactly 3 cards -> they tile into perfectly full rows.
-  // Pairs + singles are packed densely right after (no blank pockets).
-  const trios=[]; const rest=[]; const misc=[];
-  for(const g of groups){
-    const picks=g.members.map(d=>pick(d));
-    picks.forEach(p=>p.extras.forEach(e=>misc.push(e)));
-    const cells=picks.map(p=>p.primary).filter(Boolean); // evolution line, one per Pokémon
-    if(g.size>=3){ for(const c of cells)trios.push(c); }
-    else { for(const c of cells)rest.push(c); }
+  function lineOf(fam){
+    const ps=fam.filter(d=>byDex[d]&&byDex[d].length).map(d=>pick(d));
+    ps.forEach(p=>p.extras.forEach(e=>misc.push(e)));
+    return ps.map(p=>p.primary).filter(Boolean);
   }
-  const mainCells=trios.concat(rest);
+  // 1) Featured lines (each family = one row)
+  const featuredCells=[];
+  for(const fam of FEATURED){ const line=lineOf(fam); for(const c of line)featuredCells.push(c); while(featuredCells.length%3!==0)featuredCells.push(null); }
+  const featuredKeys=new Set(FEATURED.map(f=>f.join('-')));
+  // 2) Everything else, bucketed by element so every page is a single type.
+  const buckets={};
+  for(const fam of FAMILIES){
+    if(featuredKeys.has(fam.join('-'))) continue;
+    const line=lineOf(fam); if(!line.length) continue;
+    const el=line[0].element;
+    (buckets[el]=buckets[el]||{trios:[],pairs:[],singles:[]});
+    if(line.length>=3) buckets[el].trios.push(line.slice(0,3));
+    else if(line.length===2) buckets[el].pairs.push(line);
+    else buckets[el].singles.push(line[0]);
+  }
+  const typeSections=[];
+  for(const el of COLOR_ORDER){
+    const b=buckets[el]; if(!b) continue;
+    const cells=[]; const sq=b.singles.slice();
+    for(const trio of b.trios){ for(const c of trio)cells.push(c); }       // 3-stage line = its own row
+    for(const pair of b.pairs){ cells.push(pair[0],pair[1]); cells.push(sq.length?sq.shift():null); } // pair stays on one row + same-type single
+    for(const s of sq) cells.push(s);                                       // leftover singles
+    while(cells.length%3!==0) cells.push(null);
+    if(cells.length) typeSections.push({el,cells});
+  }
   const te=pool.filter(c=>!c.dex).sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
   misc.sort((a,b)=>(b.holo?1:0)-(a.holo?1:0)||(a.dex||999)-(b.dex||999)||SETORD[a.set]-SETORD[b.set]||a.num-b.num);
-  return {mainCells,te,misc};
+  return {featuredCells,typeSections,te,misc};
 }
 
 function imgFallback(el){
@@ -479,12 +495,13 @@ function trainerEnergyHTML(teCards){
 }
 
 function renderFamilyHTML(){
-  const {mainCells,te,misc}=familyLayout(filteredPool());
+  const {featuredCells,typeSections,te,misc}=familyLayout(filteredPool());
   let html='';
-  if(mainCells.length||te.length||misc.length){
-    html+=`<div class="famnote">Pokédex order, grouped by evolution family — full 3-stage lines first, then pairs and single-stage Pokémon. One card per Pokémon with the <b>holo shown in its evolution-line row</b>; non-holo twins and extra prints are collected under <b>Duplicates &amp; Variants</b>.</div>`;
+  if(featuredCells.length||typeSections.length||te.length||misc.length){
+    html+=`<div class="famnote">Featured lines first (starters, Eeveelutions, Legendary Birds), then <b>one type per page</b>. Evolution pairs stay together on a row, with a same-type single filling the third slot. One card per Pokémon (holo preferred); extra prints go to <b>Duplicates &amp; Variants</b>.</div>`;
   }
-  if(mainCells.length){ html+=pagesFromList(mainCells,{label:'Pokémon — by evolution family (Pokédex order)'}); }
+  if(featuredCells.length){ html+=pagesFromList(featuredCells,{label:'Featured lines'}); }
+  for(const s of typeSections){ html+=pagesFromList(s.cells,{label:s.el,icon:typeBadge(s.el,20)}); }
   html+=trainerEnergyHTML(te);
   if(misc.length){ html+=pagesFromList(misc,{label:'Duplicates &amp; Variants'}); }
   if(!html)html='<div class="page"><p style="text-align:center;color:#9aa1b2;padding:30px">No cards match.</p></div>';
