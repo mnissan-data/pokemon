@@ -431,19 +431,27 @@ function familyLayout(pool){
     else if(line.length===2) buckets[el].pairs.push(line);
     else buckets[el].singles.push(line[0]);
   }
+  // duplicate prints grouped by type — used to fill pair third-slots and page tails (so each page stays one type)
+  const dupByEl={};
+  misc.forEach(e=>{ if(e.element){ (dupByEl[e.element]=dupByEl[e.element]||[]).push(e); } });
+  for(const k in dupByEl){ dupByEl[k].sort((a,b)=>(b.holo?1:0)-(a.holo?1:0)||(a.dex||999)-(b.dex||999)||SETORD[a.set]-SETORD[b.set]||a.num-b.num); }
+  const usedDup=new Set();
   const typeSections=[];
   for(const el of COLOR_ORDER){
     const b=buckets[el]; if(!b) continue;
-    const cells=[]; const sq=b.singles.slice();
-    for(const trio of b.trios){ for(const c of trio)cells.push(c); }       // 3-stage line = its own row
-    for(const pair of b.pairs){ cells.push(pair[0],pair[1]); cells.push(sq.length?sq.shift():null); } // pair stays on one row + same-type single
-    for(const s of sq) cells.push(s);                                       // leftover singles
+    const sq=b.singles.slice(); const dq=(dupByEl[el]||[]);
+    const take=()=>{ const d=dq.shift(); if(d)usedDup.add(d.id); return d||null; };
+    const cells=[];
+    for(const trio of b.trios){ for(const c of trio)cells.push(c); }                 // 3-stage line = its own row
+    for(const pair of b.pairs){ cells.push(pair[0],pair[1]); cells.push(sq.length?sq.shift():take()); } // pair row + same-type single, else same-type duplicate
+    for(const s of sq) cells.push(s);                                                 // leftover singles
+    while(dq.length) cells.push(take());                                              // remaining same-type duplicates fill the page tail
     while(cells.length%3!==0) cells.push(null);
-    if(cells.length) typeSections.push({el,cells});
+    if(cells.some(c=>c)) typeSections.push({el,cells});
   }
   const te=pool.filter(c=>!c.dex).sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
-  misc.sort((a,b)=>(b.holo?1:0)-(a.holo?1:0)||(a.dex||999)-(b.dex||999)||SETORD[a.set]-SETORD[b.set]||a.num-b.num);
-  return {featuredCells,typeSections,te,misc};
+  const leftover=misc.filter(e=>!usedDup.has(e.id)).sort((a,b)=>(b.holo?1:0)-(a.holo?1:0)||(a.dex||999)-(b.dex||999)||SETORD[a.set]-SETORD[b.set]||a.num-b.num);
+  return {featuredCells,typeSections,te,misc:leftover};
 }
 
 function imgFallback(el){
@@ -498,7 +506,7 @@ function renderFamilyHTML(){
   const {featuredCells,typeSections,te,misc}=familyLayout(filteredPool());
   let html='';
   if(featuredCells.length||typeSections.length||te.length||misc.length){
-    html+=`<div class="famnote">Featured lines first (starters, Eeveelutions, Legendary Birds), then <b>one type per page</b>. Evolution pairs stay together on a row, with a same-type single filling the third slot. One card per Pokémon (holo preferred); extra prints go to <b>Duplicates &amp; Variants</b>.</div>`;
+    html+=`<div class="famnote">Featured lines first (starters, Eeveelutions, Legendary Birds), then <b>one type per page</b>. Evolution pairs stay together on a row; the third slot is filled by a same-type single, then a same-type duplicate print, so each type's pages fill out completely.</div>`;
   }
   if(featuredCells.length){ html+=pagesFromList(featuredCells,{label:'Featured lines'}); }
   for(const s of typeSections){ html+=pagesFromList(s.cells,{label:s.el,icon:typeBadge(s.el,20)}); }
