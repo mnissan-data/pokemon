@@ -435,21 +435,28 @@ function familyLayout(pool){
   const dupByEl={};
   misc.forEach(e=>{ if(e.element){ (dupByEl[e.element]=dupByEl[e.element]||[]).push(e); } });
   for(const k in dupByEl){ dupByEl[k].sort((a,b)=>(b.holo?1:0)-(a.holo?1:0)||(a.dex||999)-(b.dex||999)||SETORD[a.set]-SETORD[b.set]||a.num-b.num); }
-  const usedDup=new Set();
+  // basic Energy of each type, used to top up a leftover gap once duplicates run out
+  const energyByEl={};
+  pool.forEach(c=>{ if((c.rarity==='Energy'||c.name==='Double Colorless Energy')&&!energyByEl[c.element]) energyByEl[c.element]=c; });
+  const usedDup=new Set(); const usedEnergy=new Set();
   const typeSections=[];
   for(const el of COLOR_ORDER){
     const b=buckets[el]; if(!b) continue;
     const sq=b.singles.slice(); const dq=(dupByEl[el]||[]);
-    const take=()=>{ const d=dq.shift(); if(d)usedDup.add(d.id); return d||null; };
+    const take=()=>{                                   // same-type duplicate first, then this type's basic energy
+      if(dq.length){ const d=dq.shift(); usedDup.add(d.id); return d; }
+      const en=energyByEl[el]; if(en&&!usedEnergy.has(en.id)){ usedEnergy.add(en.id); return en; }
+      return null;
+    };
     const cells=[];
     for(const trio of b.trios){ for(const c of trio)cells.push(c); }                 // 3-stage line = its own row
-    for(const pair of b.pairs){ cells.push(pair[0],pair[1]); cells.push(sq.length?sq.shift():take()); } // pair row + same-type single, else same-type duplicate
+    for(const pair of b.pairs){ cells.push(pair[0],pair[1]); cells.push(sq.length?sq.shift():take()); } // pair row + same-type single, else duplicate/energy
     for(const s of sq) cells.push(s);                                                 // leftover singles
     while(dq.length) cells.push(take());                                              // remaining same-type duplicates fill the page tail
-    while(cells.length%3!==0) cells.push(null);
+    while(cells.length%3!==0) cells.push(take());                                     // top up the last row with the type's energy, else blank
     if(cells.some(c=>c)) typeSections.push({el,cells});
   }
-  const te=pool.filter(c=>!c.dex).sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
+  const te=pool.filter(c=>!c.dex&&!usedEnergy.has(c.id)).sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
   const leftover=misc.filter(e=>!usedDup.has(e.id)).sort((a,b)=>(b.holo?1:0)-(a.holo?1:0)||(a.dex||999)-(b.dex||999)||SETORD[a.set]-SETORD[b.set]||a.num-b.num);
   return {featuredCells,typeSections,te,misc:leftover};
 }
@@ -506,7 +513,7 @@ function renderFamilyHTML(){
   const {featuredCells,typeSections,te,misc}=familyLayout(filteredPool());
   let html='';
   if(featuredCells.length||typeSections.length||te.length||misc.length){
-    html+=`<div class="famnote">Featured lines first (starters, Eeveelutions, Legendary Birds), then <b>one type per page</b>. Evolution pairs stay together on a row; the third slot is filled by a same-type single, then a same-type duplicate print, so each type's pages fill out completely.</div>`;
+    html+=`<div class="famnote">Featured lines first (starters, Eeveelutions, Legendary Birds), then <b>one type per page</b>. Evolution pairs stay together on a row; empty slots are filled with a same-type single, then a same-type duplicate, then that type's basic Energy card — so each page fills out completely.</div>`;
   }
   if(featuredCells.length){ html+=pagesFromList(featuredCells,{label:'Featured lines'}); }
   for(const s of typeSections){ html+=pagesFromList(s.cells,{label:s.el,icon:typeBadge(s.el,20)}); }
