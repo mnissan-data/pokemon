@@ -446,20 +446,24 @@ function familyLayout(pool){
   const typeSections=[];
   for(const el of COLOR_ORDER){
     const b=buckets[el]; if(!b) continue;
-    const trios=b.trios.slice();
-    const pairs=b.pairs.slice().sort((a,b2)=>rk(a[0])-rk(b2[0]));                     // common evolution lines first, then uncommon
-    const dupSet=new Set((dupByEl[el]||[]).map(d=>d.id));
-    const fillers=b.singles.concat(dupByEl[el]||[]).sort((a,b2)=>rk(a)-rk(b2)||(a.dex||999)-(b2.dex||999));
+    const singlesQ=b.singles.slice(); const dupQ=(dupByEl[el]||[]).slice();
     const cells=[];
-    // 3-stage lines -> vertical 3-tall columns, 3 per block (fills a 3x3 page, no gaps)
-    while(trios.length>=3){ const g=trios.splice(0,3); for(let r=0;r<3;r++)for(let j=0;j<3;j++)cells.push(g[j][r]); }
-    // 2-stage lines -> vertical 2-tall columns, 3 per block (fills a 3x2 block, no gaps)
-    while(pairs.length>=3){ const g=pairs.splice(0,3); for(let r=0;r<2;r++)for(let j=0;j<3;j++)cells.push(g[j][r]); }
-    // remainder: leftover lines + same-type fillers, then energy/blank
+    // 3-stage lines: each on its own row (horizontal)
+    for(const trio of b.trios){ for(const c of trio)cells.push(c); }
+    // 2-stage lines: kept horizontal on one row with a same-type single in the 3rd slot; overflow goes vertical
+    const vert=[];
+    for(const pair of b.pairs){
+      if(singlesQ.length){ cells.push(pair[0],pair[1],singlesQ.shift()); }
+      else vert.push(pair);
+    }
+    // overflow lines: stack vertically, common rarity first then uncommon, 3 per 3x2 block (no gaps)
+    vert.sort((a,b2)=>rk(a[0])-rk(b2[0]));
+    while(vert.length>=3){ const g=vert.splice(0,3); for(let r=0;r<2;r++)for(let j=0;j<3;j++)cells.push(g[j][r]); }
+    // remainder: leftover vertical pair, leftover singles, then same-type duplicates, then energy/blank
     const rem=[];
-    trios.forEach(t=>t.forEach(c=>rem.push(c)));
-    pairs.forEach(p=>p.forEach(c=>rem.push(c)));
-    fillers.forEach(c=>{ if(dupSet.has(c.id))usedDup.add(c.id); rem.push(c); });
+    vert.forEach(p=>{ rem.push(p[0],p[1]); });
+    singlesQ.forEach(s=>rem.push(s));
+    dupQ.forEach(d=>{ usedDup.add(d.id); rem.push(d); });
     rem.forEach(c=>cells.push(c));
     while(cells.length%3!==0){ const en=energyByEl[el]; if(en&&!usedEnergy.has(en.id)){usedEnergy.add(en.id);cells.push(en);} else cells.push(null); }
     if(cells.some(c=>c)) typeSections.push({el,cells});
@@ -521,7 +525,7 @@ function renderFamilyHTML(){
   const {featuredCells,typeSections,te,misc}=familyLayout(filteredPool());
   let html='';
   if(featuredCells.length||typeSections.length||te.length||misc.length){
-    html+=`<div class="famnote">Featured lines first (starters, Eeveelutions, Legendary Birds), then <b>one type per page</b>. Evolution lines are <b>stacked vertically</b> (base on top), common lines first then uncommon, so they tile without gaps; same-type singles, duplicates, then the type's Energy card fill any remainder.</div>`;
+    html+=`<div class="famnote">Featured lines first (starters, Eeveelutions, Legendary Birds), then <b>one type per page</b>. Evolution lines sit on a row with a same-type single in the third slot; when a type runs out of singles, the <b>leftover lines stack vertically</b> (common first, then uncommon) to fill the space.</div>`;
   }
   if(featuredCells.length){ html+=pagesFromList(featuredCells,{label:'Featured lines'}); }
   for(const s of typeSections){ html+=pagesFromList(s.cells,{label:s.el,icon:typeBadge(s.el,20)}); }
