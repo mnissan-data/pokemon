@@ -253,6 +253,7 @@ header.app .catch{position:relative;z-index:3;margin-top:4px;font-size:12px;colo
       <button data-sort="rarity">Rarity</button>
       <button data-sort="family">Evo Family</button>
       <button data-sort="familyv">Evo Vertical</button>
+      <button data-sort="theme">Theme</button>
     </div>
     <div class="seg" id="filtSeg">
       <div class="lbl">Show</div>
@@ -403,6 +404,26 @@ function famLabel(fam){
 // Featured lines shown first, exempt from the one-type-per-page rule.
 const FEATURED=[[1,2,3],[4,5,6],[7,8,9],[134,135,136],[144,145,146]];
 const PREFER_SET={145:'Base'}; // Zapdos -> use the Base Set version (Fossil goes to duplicates)
+// Pokémon game-type "themes" (Bug, Bird, Dragon, ...) for the Theme sort
+const THEME_GROUPS={
+ Bug:[10,11,12,13,14,15,46,47,48,49,123,127],
+ Bird:[16,17,18,21,22,83,84,85],
+ Normal:[19,20,52,53,108,113,115,128,132,133,137,143],
+ Fairy:[35,36,39,40],
+ Plant:[43,44,45,69,70,71,102,103,114],
+ Poison:[23,24,29,30,31,32,33,34,41,42,88,89,109,110],
+ Electric:[25,26,81,82,100,101,125],
+ Ground:[27,28,50,51,104,105,111,112],
+ Rock:[74,75,76,95,138,139,140,141,142],
+ Fire:[37,38,58,59,77,78,126],
+ Fighting:[56,57,66,67,68,106,107],
+ Water:[54,55,60,61,62,72,73,86,87,90,91,98,99,116,117,118,119,120,121,129,130,131],
+ Psychic:[63,64,65,79,80,96,97,122,124,150,151],
+ Ghost:[92,93,94],
+ Dragon:[147,148,149]
+};
+const THEME={}; for(const k in THEME_GROUPS){ THEME_GROUPS[k].forEach(d=>THEME[d]=k); }
+const THEME_ORDER=['Bird','Bug','Normal','Fairy','Plant','Poison','Fire','Fighting','Electric','Ground','Rock','Water','Psychic','Ghost','Dragon'];
 function familyLayout(pool){
   const byDex={}; pool.forEach(c=>{if(c.dex){(byDex[c.dex]=byDex[c.dex]||[]).push(c);}});
   const misc=[];
@@ -526,6 +547,67 @@ function renderFamilyHTML(){
   return html;
 }
 
+// ---- Theme layout: one TCG type AND one Pokémon-theme per page (Grass·Bug, Colorless·Bird, ...) ----
+function themeLayout(pool){
+  const byDex={}; pool.forEach(c=>{if(c.dex){(byDex[c.dex]=byDex[c.dex]||[]).push(c);}});
+  const misc=[];
+  function pick(dex){
+    let cs=(byDex[dex]||[]).slice().sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
+    if(PREFER_SET[dex]){ cs.sort((a,b)=>((b.set===PREFER_SET[dex])?1:0)-((a.set===PREFER_SET[dex])?1:0)||SETORD[a.set]-SETORD[b.set]||a.num-b.num); }
+    const holos=cs.filter(c=>c.holo), non=cs.filter(c=>!c.holo);
+    const primary=holos[0]||non[0]||null;
+    return {primary,extras:cs.filter(c=>c!==primary)};
+  }
+  function lineOf(fam){ const ps=fam.filter(d=>byDex[d]&&byDex[d].length).map(d=>pick(d)); ps.forEach(p=>p.extras.forEach(e=>misc.push(e))); return ps.map(p=>p.primary).filter(Boolean); }
+  const featuredCells=[];
+  for(const fam of FEATURED){ const line=lineOf(fam); for(const c of line)featuredCells.push(c); while(featuredCells.length%3!==0)featuredCells.push(null); }
+  const featuredKeys=new Set(FEATURED.map(f=>f.join('-')));
+  const buckets={};
+  for(const fam of FAMILIES){
+    if(featuredKeys.has(fam.join('-'))) continue;
+    const line=lineOf(fam); if(!line.length) continue;
+    const el=line[0].element; const theme=THEME[fam[0]]||'Other'; const key=el+'|'+theme;
+    (buckets[key]=buckets[key]||{trios:[],pairs:[],singles:[],el,theme});
+    if(line.length>=3) buckets[key].trios.push(line.slice(0,3));
+    else if(line.length===2) buckets[key].pairs.push(line);
+    else buckets[key].singles.push(line[0]);
+  }
+  const dupBy={}; misc.forEach(e=>{ if(e.dex){ const k=e.element+'|'+(THEME[e.dex]||'Other'); (dupBy[k]=dupBy[k]||[]).push(e); } });
+  const energyByEl={}; pool.forEach(c=>{ if((c.rarity==='Energy'||c.name==='Double Colorless Energy')&&!energyByEl[c.element]) energyByEl[c.element]=c; });
+  const usedDup=new Set(), usedEnergy=new Set();
+  const sections=[];
+  for(const el of COLOR_ORDER){
+    for(const theme of THEME_ORDER){
+      const key=el+'|'+theme; const b=buckets[key]; if(!b) continue;
+      const sq=b.singles.slice(); const dq=(dupBy[key]||[]);
+      const take=()=>{ if(dq.length){const d=dq.shift();usedDup.add(d.id);return d;} const en=energyByEl[el]; if(en&&!usedEnergy.has(en.id)){usedEnergy.add(en.id);return en;} return null; };
+      const cells=[];
+      for(const trio of b.trios){ for(const c of trio)cells.push(c); }
+      for(const pair of b.pairs){ cells.push(pair[0],pair[1]); cells.push(sq.length?sq.shift():take()); }
+      for(const s of sq) cells.push(s);
+      while(dq.length) cells.push(take());
+      while(cells.length%3!==0) cells.push(take());
+      if(cells.some(c=>c)) sections.push({el,theme,cells});
+    }
+  }
+  const te=pool.filter(c=>!c.dex&&!usedEnergy.has(c.id)).sort((a,b)=>SETORD[a.set]-SETORD[b.set]||a.num-b.num);
+  const leftover=misc.filter(e=>!usedDup.has(e.id)).sort((a,b)=>(b.holo?1:0)-(a.holo?1:0)||(a.dex||999)-(b.dex||999)||SETORD[a.set]-SETORD[b.set]||a.num-b.num);
+  return {featuredCells,sections,te,misc:leftover};
+}
+function renderThemeHTML(){
+  const {featuredCells,sections,te,misc}=themeLayout(filteredPool());
+  let html='';
+  if(featuredCells.length||sections.length||te.length||misc.length){
+    html+=`<div class="famnote">Grouped by Pokémon <b>theme within each TCG type</b> — so each page is one type and one theme (Grass · Bug, Colorless · Bird, Fighting · Rock, …). Starters, Eeveelutions and Legendary Birds stay in the featured rows.</div>`;
+  }
+  if(featuredCells.length){ html+=pagesFromList(featuredCells,{label:'Featured lines'}); }
+  for(const s of sections){ html+=pagesFromList(s.cells,{label:s.theme,icon:typeBadge(s.el,20)}); }
+  html+=trainerEnergyHTML(te);
+  if(misc.length){ html+=pagesFromList(misc,{label:'Duplicates &amp; Variants'}); }
+  if(!html)html='<div class="page"><p style="text-align:center;color:#9aa1b2;padding:30px">No cards match.</p></div>';
+  return html;
+}
+
 // ---- Vertical evolution layout: each evolution line is a COLUMN (base on top) ----
 function familyVerticalLayout(pool){
   const byDex={}; pool.forEach(c=>{if(c.dex){(byDex[c.dex]=byDex[c.dex]||[]).push(c);}});
@@ -615,6 +697,8 @@ function render(){
     html=renderFamilyHTML();
   }else if(sortMode==='familyv'){
     html=renderFamilyVHTML();
+  }else if(sortMode==='theme'){
+    html=renderThemeHTML();
   }else{
     const all=visible();
     const arr=all.filter(c=>c.dex);            // Pokémon only in the main flow
